@@ -20,8 +20,8 @@ import {
   forwardTo,
   raise
 } from '../src/actions';
-import { interval } from 'rxjs';
-import { map, take } from 'rxjs/operators';
+import { interval, Observable } from 'rxjs';
+import { map, tap, take } from 'rxjs/operators';
 
 const user = { name: 'David' };
 
@@ -1983,14 +1983,14 @@ describe('invoke', () => {
     });
   });
 
-  describe('with observables', () => {
+  describe.only('with observables', () => {
     const infinite$ = interval(10);
 
+    interface Events {
+      type: 'COUNT';
+      value: number;
+    }
     it('should work with an infinite observable', (done) => {
-      interface Events {
-        type: 'COUNT';
-        value: number;
-      }
       const obsMachine = Machine<{ count: number | undefined }, Events>({
         id: 'obs',
         initial: 'counting',
@@ -2128,6 +2128,68 @@ describe('invoke', () => {
           done();
         })
         .start();
+    });
+
+    it.only('should cancel upon leaving the state', async () => {
+      let started = false;
+      let canceled = false;
+
+      // An interval observable with a customized unsubscribe function
+      const cancelableInterval: Observable<{
+        type: string;
+        value: number;
+      }> = new Observable((notify) => {
+        started = true;
+        const sub = infinite$
+          .pipe(map((value) => ({ type: 'COUNT', value })))
+          .subscribe((v) => {
+            notify.next(v);
+          });
+
+        return () => {
+          sub.unsubscribe();
+          canceled = true;
+        };
+      });
+
+      //#region "machine"
+      const obsMachine = Machine<{ count: number | undefined }, Events>({
+        id: 'obs',
+        initial: 'counting',
+        context: { count: undefined },
+        states: {
+          counting: {
+            invoke: {
+              src: () => cancelableInterval
+            },
+            always: {
+              target: 'counted',
+              cond: (ctx) => ctx.count === 5
+            },
+            on: {
+              COUNT: { actions: assign({ count: (_, e) => e.value }) }
+            }
+          },
+          counted: {
+            type: 'final'
+          }
+        }
+      });
+
+      const service = interpret(obsMachine).start();
+      //#endregion
+
+      // This works
+      expect(started).toBeTruthy();
+
+      // Try and leave, to cancel
+      service.send('counted');
+
+      // Await a bit? nope
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // Why not?
+      expect(canceled).toBeTruthy();
     });
   });
 
