@@ -21,7 +21,7 @@ import {
   raise
 } from '../src/actions';
 import { interval, Observable } from 'rxjs';
-import { map, tap, take } from 'rxjs/operators';
+import { map, take } from 'rxjs/operators';
 
 const user = { name: 'David' };
 
@@ -1987,7 +1987,7 @@ describe('invoke', () => {
     const infinite$ = interval(10);
 
     interface Events {
-      type: 'COUNT';
+      type: 'COUNT' | 'CANCEL';
       value: number;
     }
     it('should work with an infinite observable', (done) => {
@@ -2162,12 +2162,13 @@ describe('invoke', () => {
             invoke: {
               src: () => cancelableInterval
             },
-            always: {
-              target: 'counted',
-              cond: (ctx) => ctx.count === 5
-            },
+            // always: {
+            //   target: 'counted',
+            //   cond: (ctx) => ctx.count === 5
+            // },
             on: {
-              COUNT: { actions: assign({ count: (_, e) => e.value }) }
+              COUNT: { actions: assign({ count: (_, e) => e.value }) },
+              CANCEL: 'counted'
             }
           },
           counted: {
@@ -2176,17 +2177,24 @@ describe('invoke', () => {
         }
       });
 
-      const service = interpret(obsMachine).start();
+      const service = interpret(obsMachine)
+        // .onTransition((_, e) => {
+        //   console.error('Transition', e)
+        // })
+        .start();
       //#endregion
 
       // This works
       expect(started).toBeTruthy();
 
+      expect(service.state.value).toEqual('counting');
+
       // Try and leave, to cancel
-      service.send('counted');
+      service.send('CANCEL');
+      expect(service.state.value).toEqual('counted');
 
       // Await a bit? nope
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // await new Promise((resolve) => setTimeout(resolve, 20));
 
       // Why not?
       expect(canceled).toBeTruthy();
